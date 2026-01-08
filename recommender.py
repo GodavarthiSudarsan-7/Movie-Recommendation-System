@@ -40,10 +40,8 @@ def suggest_movies(query, top_n=5):
 def recommend(movie_name, top_n=5):
     movie_name = movie_name.lower()
     titles = movies["title"].str.lower()
-
     if movie_name not in titles.values:
         return suggest_movies(movie_name)
-
     index = titles[titles == movie_name].index[0]
     distances = sorted(list(enumerate(similarity[index])), key=lambda x: x[1], reverse=True)[1:80]
     pool = [movies.iloc[i[0]].title for i in distances]
@@ -112,3 +110,24 @@ def smart_recommend(movie_name=None, mood=None, genre=None):
     if mood:
         return recommend_by_mood(mood)
     return recommend_popular()
+
+def get_movie_genres(title):
+    row = movies[movies["title"].str.lower() == title.lower()]
+    if row.empty:
+        return set()
+    tags = row.iloc[0]["tags"]
+    return set(tags.split())
+
+def precision_at_k(movie_name, k=5):
+    recommendations = recommend(movie_name, top_n=k)
+    if not recommendations:
+        return 0.0
+    query_genres = get_movie_genres(movie_name)
+    if not query_genres:
+        return 0.0
+    relevant = 0
+    for rec in recommendations:
+        rec_genres = get_movie_genres(rec)
+        if query_genres.intersection(rec_genres):
+            relevant += 1
+    return relevant / k
