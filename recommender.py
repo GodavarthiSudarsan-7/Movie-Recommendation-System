@@ -2,6 +2,7 @@ import pandas as pd
 import ast
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.cluster import KMeans
 import random
 
 movies = pd.read_csv("data/movies.csv")
@@ -29,6 +30,9 @@ tfidf = TfidfVectorizer(stop_words="english", max_features=5000)
 vectors = tfidf.fit_transform(movies["tags"]).toarray()
 similarity = cosine_similarity(vectors)
 
+kmeans = KMeans(n_clusters=10, random_state=42, n_init=10)
+movies["cluster"] = kmeans.fit_predict(vectors)
+
 def suggest_movies(query, top_n=5):
     query = query.lower()
     titles = movies["title"].str.lower()
@@ -46,6 +50,18 @@ def recommend(movie_name, top_n=5):
     distances = sorted(list(enumerate(similarity[index])), key=lambda x: x[1], reverse=True)[1:80]
     pool = [movies.iloc[i[0]].title for i in distances]
     return random.sample(pool, min(top_n, len(pool)))
+
+def recommend_by_cluster(movie_name, top_n=5):
+    titles = movies["title"].str.lower()
+    if movie_name.lower() not in titles.values:
+        return recommend_popular(top_n)
+    index = titles[titles == movie_name.lower()].index[0]
+    cluster_id = movies.iloc[index]["cluster"]
+    cluster_movies = movies[movies["cluster"] == cluster_id]
+    cluster_movies = cluster_movies[cluster_movies.index != index]
+    if len(cluster_movies) <= top_n:
+        return cluster_movies["title"].tolist()
+    return cluster_movies.sample(top_n)["title"].tolist()
 
 def recommend_by_genre(genre, top_n=5):
     genre = genre.lower()
@@ -102,9 +118,7 @@ def smart_text_recommend(user_text):
 
 def smart_recommend(movie_name=None, mood=None, genre=None):
     if movie_name:
-        result = recommend(movie_name)
-        if result:
-            return result
+        return recommend_by_cluster(movie_name)
     if genre:
         return recommend_by_genre(genre)
     if mood:
