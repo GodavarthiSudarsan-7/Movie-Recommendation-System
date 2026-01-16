@@ -33,35 +33,22 @@ similarity = cosine_similarity(vectors)
 kmeans = KMeans(n_clusters=10, random_state=42, n_init=10)
 movies["cluster"] = kmeans.fit_predict(vectors)
 
-def suggest_movies(query, top_n=5):
-    query = query.lower()
-    titles = movies["title"].str.lower()
-    pool = movies[titles.str.contains(query)]
-    if len(pool) <= top_n:
-        return pool["title"].tolist()
-    return pool.sample(top_n)["title"].tolist()
-
-def recommend(movie_name, top_n=5):
-    movie_name = movie_name.lower()
-    titles = movies["title"].str.lower()
-    if movie_name not in titles.values:
-        return suggest_movies(movie_name)
-    index = titles[titles == movie_name].index[0]
-    distances = sorted(list(enumerate(similarity[index])), key=lambda x: x[1], reverse=True)[1:80]
-    pool = [movies.iloc[i[0]].title for i in distances]
-    return random.sample(pool, min(top_n, len(pool)))
-
-def recommend_by_cluster(movie_name, top_n=5):
+def hybrid_recommend(movie_name, top_n=5):
     titles = movies["title"].str.lower()
     if movie_name.lower() not in titles.values:
         return recommend_popular(top_n)
+
     index = titles[titles == movie_name.lower()].index[0]
     cluster_id = movies.iloc[index]["cluster"]
-    cluster_movies = movies[movies["cluster"] == cluster_id]
-    cluster_movies = cluster_movies[cluster_movies.index != index]
-    if len(cluster_movies) <= top_n:
-        return cluster_movies["title"].tolist()
-    return cluster_movies.sample(top_n)["title"].tolist()
+
+    cluster_indices = movies[movies["cluster"] == cluster_id].index
+    cluster_indices = [i for i in cluster_indices if i != index]
+
+    scored = [(i, similarity[index][i]) for i in cluster_indices]
+    scored = sorted(scored, key=lambda x: x[1], reverse=True)
+
+    top_indices = [i for i, _ in scored[:top_n]]
+    return movies.loc[top_indices]["title"].tolist()
 
 def recommend_by_genre(genre, top_n=5):
     genre = genre.lower()
@@ -69,9 +56,7 @@ def recommend_by_genre(genre, top_n=5):
     if len(filtered) == 0:
         return recommend_popular(top_n)
     pool = filtered.sort_values(by="vote_average", ascending=False).head(80)
-    if len(pool) <= top_n:
-        return pool["title"].tolist()
-    return pool.sample(top_n)["title"].tolist()
+    return pool.sample(min(top_n, len(pool)))["title"].tolist()
 
 mood_map = {
     "happy": ["comedy", "family"],
@@ -87,9 +72,7 @@ def recommend_by_mood(mood, top_n=5):
         return recommend_popular(top_n)
     filtered = movies[movies["tags"].str.contains("|".join(genres))]
     pool = filtered.sort_values(by="vote_average", ascending=False).head(80)
-    if len(pool) <= top_n:
-        return pool["title"].tolist()
-    return pool.sample(top_n)["title"].tolist()
+    return pool.sample(min(top_n, len(pool)))["title"].tolist()
 
 def recommend_popular(top_n=5):
     movies["score"] = movies["vote_average"] * 0.7 + movies["popularity"] * 0.3
@@ -118,7 +101,7 @@ def smart_text_recommend(user_text):
 
 def smart_recommend(movie_name=None, mood=None, genre=None):
     if movie_name:
-        return recommend_by_cluster(movie_name)
+        return hybrid_recommend(movie_name)
     if genre:
         return recommend_by_genre(genre)
     if mood:
@@ -129,11 +112,10 @@ def get_movie_genres(title):
     row = movies[movies["title"].str.lower() == title.lower()]
     if row.empty:
         return set()
-    tags = row.iloc[0]["tags"]
-    return set(tags.split())
+    return set(row.iloc[0]["tags"].split())
 
 def precision_at_k(movie_name, k=5):
-    recommendations = recommend(movie_name, top_n=k)
+    recommendations = hybrid_recommend(movie_name, top_n=k)
     if not recommendations:
         return 0.0
     query_genres = get_movie_genres(movie_name)
@@ -141,7 +123,6 @@ def precision_at_k(movie_name, k=5):
         return 0.0
     relevant = 0
     for rec in recommendations:
-        rec_genres = get_movie_genres(rec)
-        if query_genres.intersection(rec_genres):
+        if query_genres.intersection(get_movie_genres(rec)):
             relevant += 1
     return relevant / k
